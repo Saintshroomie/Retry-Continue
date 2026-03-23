@@ -2,7 +2,7 @@
 
 ## Summary
 
-A UI extension that adds a **Retry** button to SillyTavern's quick-action bar (next to Impersonate, Continue, Send). Retry automates the manual workflow of: edit a message to keep the good part → delete the bad part → hit Continue → repeat until satisfied. It does this by snapshotting the message at the point the user commits to, then allowing repeated re-generations from that snapshot without manual editing.
+A UI extension that adds a **Retry** button to SillyTavern's quick-action bar (next to Impersonate, Continue, Send). Retry automates the manual workflow of: edit a message to keep the good part → delete the bad part → hit Continue → repeat until satisfied. It does this by snapshotting the message at the point the user commits to, then creating a **new swipe** for each retry attempt and continuing from the snapshot. All retry results are stored as swipes on the same message, so the user can browse them using ST's native swipe arrows and pick the best one.
 
 ---
 
@@ -52,21 +52,28 @@ Add a **Retry** button (↻ icon) to the quick-action bar at the bottom of the c
 5. The extension:
    - **Saves a snapshot** of the current message text (the user's edited version — the "good prefix").
    - Records which message index this snapshot belongs to.
-   - Triggers a **Continue** generation from this text.
-6. The AI generates new text appended to the snapshot. The full message is now: `snapshot + new_continuation`.
+   - **Creates a new swipe** on this message containing the snapshot text.
+   - Switches to the new swipe and triggers a **Continue** generation from it.
+6. The AI generates new text appended to the snapshot. The new swipe now contains: `snapshot + continuation_A`.
 
 #### Subsequent Retries — Iterating from the Snapshot
 
 7. The user reads the result. The continuation is still not great.
 8. The user clicks **Retry** again.
 9. The extension:
-   - **Restores the message** back to the snapshot text (discarding the previous continuation).
-   - Triggers another **Continue** generation.
-10. Repeat as needed. Each Retry always returns to the same snapshot and re-generates.
+   - **Creates another new swipe** with the snapshot text.
+   - Switches to it and triggers another **Continue** generation.
+10. The new swipe now contains: `snapshot + continuation_B`.
+11. Repeat as needed. Each Retry creates a new swipe and generates a fresh continuation.
 
-#### Optional: Keeping a Continuation
+#### Browsing Retry Results
 
-When the user is satisfied with a continuation, they simply **do nothing** — the message stays as-is. They can continue chatting normally. The snapshot remains stored in case they want to Retry again later.
+12. All retry attempts are stored as swipes on the same message. The user can use **ST's native swipe arrows** (left/right) to browse between all retry results and pick the one they like best.
+13. The swipe counter (e.g., "3/5") reflects the total number of swipes, including both retry-generated swipes and any regular swipes.
+
+#### Keeping a Result
+
+When the user is satisfied with a continuation, they simply **stop retrying** — the message stays on whichever swipe they're viewing. They can continue chatting normally. The snapshot remains stored in case they want to Retry again later.
 
 #### Clearing the Snapshot
 
@@ -79,7 +86,7 @@ The snapshot is automatically cleared when **any new message is added to the cha
 **The core rule:** The snapshot only applies to the most recent message in the chat at the time it was created. Any new turn — user or character — means the conversation has moved on and the snapshot is no longer relevant.
 
 The snapshot is **not** cleared by:
-- Using normal swipes on other messages.
+- Using normal swipes (browsing retry results or generating new full-message swipes).
 - Using the regular Continue button (Continue appends to whatever the current state is; Retry always resets to snapshot first).
 - Editing the snapshotted message manually (this updates the snapshot — see Edge Cases below).
 
@@ -117,9 +124,10 @@ The snapshot is cleared when **any new message is added to the chat**, regardles
 - A **character generates a new message** (a new turn, not a Continue on the existing message) → snapshot clears.
 - In **group chats**, a different character responding adds a new message → snapshot clears.
 - The user **switches chats or characters** → snapshot clears.
-- The user uses **Swipe on the snapshotted message** → snapshot clears (swipes replace the entire message, making the snapshot meaningless).
 - The user **explicitly clears** it via `/retryclear` command or context menu → snapshot clears.
 - The user **deletes messages** such that the snapshotted message is no longer the last in the chat → snapshot clears.
+
+**Not cleared by swiping:** Since retry results are stored as swipes, navigating between swipes (including generating new full-message swipes) does **not** clear the snapshot. The user can freely browse retry swipes and regular swipes while the snapshot remains available.
 
 **In short:** The snapshot only lives for the most recent message in the chat. The moment the conversation advances by even one turn in any direction, it's gone.
 
@@ -200,6 +208,8 @@ function loadRetryState() {
 
 ### Core Logic — The Retry Function
 
+Each Retry creates a new swipe containing the snapshot text, switches to it, and triggers Continue. The result is that every retry attempt is stored as a separate swipe on the message — the user can use ST's native left/right swipe arrows to browse all retry results and pick the one they like best.
+
 ```javascript
 async function doRetry() {
   const context = SillyTavern.getContext();
@@ -209,6 +219,12 @@ async function doRetry() {
   const lastMsg = chat[chat.length - 1];
   if (!lastMsg || lastMsg.is_user) {
     toastr.warning('Retry requires the last message to be from the character.');
+    return;
+  }
+
+  // Guard: don't allow retry while generation is in progress
+  if (context.isGenerating) {
+    toastr.warning('Cannot retry while generation is in progress.');
     return;
   }
 
@@ -223,34 +239,13 @@ async function doRetry() {
     saveRetryState();
     toastr.info('Retry checkpoint set.');
   } else {
-    // === SUBSEQUENT RETRY: Validate and restore snapshot ===
+    // === SUBSEQUENT RETRY: Validate snapshot ===
     if (retryState.messageId !== lastMsgIndex) {
-      // The message index has shifted (e.g., messages were added/deleted).
-      // Attempt to detect if the snapshotted message is still the last assistant
-      // message. If not, warn and reset.
       toastr.warning('Message context has changed. Resetting retry checkpoint.');
       resetRetryState();
       saveRetryState();
       updateButtonVisuals();
       return;
-    }
-
-    // Restore the message to the snapshot text
-    lastMsg.mes = retryState.snapshotText;
-
-    // Update the displayed message in the DOM
-    const messageElement = document.querySelector(
-      `#chat .mes[mesid="${lastMsgIndex}"] .mes_text`
-    );
-    if (messageElement) {
-      // Use ST's messageFormatting if available, otherwise set innerHTML
-      messageElement.innerHTML = context.messageFormatting?.(
-        retryState.snapshotText,
-        lastMsg.name,
-        lastMsg.is_system,
-        lastMsg.is_user,
-        lastMsgIndex
-      ) ?? retryState.snapshotText;
     }
   }
 
@@ -258,14 +253,85 @@ async function doRetry() {
   saveRetryState();
   updateButtonVisuals();
 
-  // Trigger Continue generation
-  // ST's Continue is typically triggered by clicking '#option_continue'
-  // or by calling the internal generate function with type 'continue'.
-  // The safest approach is to programmatically click the continue button,
-  // or use the /continue slash command via context.executeSlashCommands.
-  await triggerContinue();
+  // === Create a new swipe with the snapshot text, then Continue from it ===
+  await createSnapshotSwipeAndContinue(lastMsg, lastMsgIndex);
 }
 ```
+
+### Creating a Swipe and Continuing
+
+The key operation: add a new swipe containing the snapshot text, switch to it, then trigger Continue so the LLM generates a new continuation from the snapshot.
+
+```javascript
+async function createSnapshotSwipeAndContinue(lastMsg, lastMsgIndex) {
+  const context = SillyTavern.getContext();
+
+  // Ensure the message has a swipes array (it should, but be safe)
+  if (!lastMsg.swipes) {
+    lastMsg.swipes = [lastMsg.mes];
+    lastMsg.swipe_id = 0;
+    lastMsg.swipe_info = [{}];
+  }
+
+  // Add a new swipe with the snapshot text as its starting content
+  lastMsg.swipes.push(retryState.snapshotText);
+  lastMsg.swipe_info.push({});
+
+  // Switch to the new swipe
+  const newSwipeIndex = lastMsg.swipes.length - 1;
+  lastMsg.swipe_id = newSwipeIndex;
+  lastMsg.mes = retryState.snapshotText;
+
+  // Update the DOM to show the snapshot text on the new swipe
+  // ST needs to re-render the message and update the swipe counter display
+  await reRenderMessage(lastMsgIndex);
+
+  // Save the chat so the new swipe is persisted
+  await context.saveChat();
+
+  // Now trigger Continue to generate new text appended to the snapshot
+  await triggerContinue();
+}
+
+async function reRenderMessage(messageIndex) {
+  // Approach 1 (Preferred): Use ST's addOneMessage or equivalent re-render
+  // The exact function depends on the ST version. Common approaches:
+  const context = SillyTavern.getContext();
+
+  // Try using ST's reloadCurrentChat for a full re-render (reliable but heavy)
+  // For a lighter approach, target the specific message element:
+  const messageElement = document.querySelector(
+    `#chat .mes[mesid="${messageIndex}"]`
+  );
+
+  if (messageElement) {
+    const textElement = messageElement.querySelector('.mes_text');
+    const msg = context.chat[messageIndex];
+    if (textElement && msg) {
+      // Use ST's message formatting if available
+      if (typeof context.messageFormatting === 'function') {
+        textElement.innerHTML = context.messageFormatting(
+          msg.mes, msg.name, msg.is_system, msg.is_user, messageIndex
+        );
+      } else {
+        textElement.textContent = msg.mes;
+      }
+    }
+
+    // Update the swipe counter display (e.g., "3/5")
+    const swipeCountElement = messageElement.querySelector('.swipes-counter');
+    if (swipeCountElement && msg.swipes) {
+      swipeCountElement.textContent = `${msg.swipe_id + 1}/${msg.swipes.length}`;
+    }
+  }
+}
+```
+
+**Important implementation notes:**
+
+- **Re-rendering swipe UI:** After programmatically adding a swipe and changing `swipe_id`, the swipe navigation arrows and counter (e.g., "3/5") need to update. The simplest reliable method may be to call `context.reloadCurrentChat()` or to dispatch a synthetic swipe event. The implementer should test which approach correctly refreshes the swipe UI without side effects.
+- **`/addswipe` alternative:** ST provides a built-in `/addswipe (text)` slash command that handles swipe creation and UI updates internally. An alternative implementation could use this command to add the snapshot text as a new swipe, then trigger Continue. However, `/addswipe` may not switch to the new swipe automatically — test this behavior.
+- **Swipe metadata:** Each swipe can have associated metadata in `swipe_info[]` (timestamps, token counts, etc.). The extension pushes an empty object `{}` as a placeholder; ST will populate it when the Continue generation completes.
 
 ### Triggering Continue
 
@@ -295,17 +361,7 @@ async function triggerContinue() {
 }
 ```
 
-**Important note for the implementer:** The exact method for triggering Continue programmatically may vary across ST versions. Check `SillyTavern.getContext()` in the browser console to see what functions are available. The `/continue` slash command is the most stable interface. If the extension needs to await the completion of generation, listen for the `MESSAGE_RECEIVED` or `GENERATION_ENDED` event.
-
-### Saving the Restored Message to Chat File
-
-After restoring `lastMsg.mes` to the snapshot, the chat array in memory is updated, but the chat **file on disk** also needs to be saved. Call `context.saveChatDebounced()` or `context.saveChat()` after modifying the message to ensure persistence.
-
-```javascript
-// After restoring snapshot:
-lastMsg.mes = retryState.snapshotText;
-context.saveChat(); // Persist the restored state before triggering Continue
-```
+**Important note for the implementer:** The exact method for triggering Continue programmatically may vary across ST versions. Check `SillyTavern.getContext()` in the browser console to see what functions are available. The `/continue` slash command is the most stable interface. If the extension needs to await the completion of generation, listen for the `GENERATION_ENDED` event.
 
 ### UI — Adding the Button
 
@@ -408,15 +464,6 @@ function init() {
     }
   });
 
-  // If the user swipes on the snapshotted message, clear the snapshot
-  eventSource.on(eventTypes.MESSAGE_SWIPED, (messageId) => {
-    if (retryState.active && parseInt(messageId) === retryState.messageId) {
-      resetRetryState();
-      saveRetryState();
-      updateButtonVisuals();
-    }
-  });
-
   // Load state on init (for page refresh scenarios)
   loadRetryState();
 }
@@ -515,7 +562,7 @@ eventSource.on(eventTypes.MESSAGE_EDITED, (messageId) => {
 
 ### What if the user uses Swipe on the snapshotted message?
 
-**Rule:** Swiping replaces the entire message (all swipes are full alternatives). If the user swipes away from the snapshotted message, **clear the snapshot** — the message content is now entirely different. Listen for `MESSAGE_SWIPED` or equivalent.
+**Rule:** Swiping between existing retries is fine — that's the whole point. The user is browsing their retry results. The snapshot remains active. However, if the user triggers a **new swipe generation** (right arrow past the last swipe, which generates a fresh full-message alternative), that new swipe won't have the snapshot prefix — it's a completely independent generation. The snapshot should **remain active** so the user can still press Retry to create another continuation-based swipe. The snapshot only clears per the lifecycle rules (new message added, chat switch, etc.).
 
 ### What if the user deletes messages after the snapshot?
 
@@ -531,7 +578,7 @@ eventSource.on(eventTypes.MESSAGE_EDITED, (messageId) => {
 
 ---
 
-## Slash Command Registration (Optional but Recommended)
+## Slash Command Registration
 
 Register a `/retry` command so power users and Quick Replies can invoke it:
 
@@ -561,18 +608,7 @@ context.registerSlashCommand(
 
 ---
 
-## Context Menu Integration (Optional Enhancement)
-
-Add a right-click context menu option to any character message:
-
-- **"Set as Retry Checkpoint"** — Manually sets the snapshot to this message's current content, even if it's not the last message (for advanced use).
-- **"Clear Retry Checkpoint"** — Clears the active snapshot.
-
-This can be done by hooking into ST's message context menu system (check for `eventTypes.MESSAGE_CONTEXT_MENU` or the `.mes_buttons` DOM structure).
-
----
-
-## Settings Panel (Optional Enhancement)
+## Settings Panel
 
 Add a minimal settings panel in the Extensions drawer:
 
@@ -587,16 +623,14 @@ Add a minimal settings panel in the Extensions drawer:
 1. [ ] Create extension folder structure and `manifest.json`
 2. [ ] Implement `retryState` management (in-memory + chatMetadata persistence)
 3. [ ] Add Retry button to the quick-action bar via DOM manipulation
-4. [ ] Implement `doRetry()` — snapshot creation, message restoration, Continue trigger
-5. [ ] Implement `triggerContinue()` — test with `/continue` slash command first
-6. [ ] Subscribe to events: `CHAT_CHANGED`, `USER_MESSAGE_RENDERED`, `CHARACTER_MESSAGE_RENDERED`, `MESSAGE_EDITED`, `MESSAGE_SWIPED`
-7. [ ] Handle edge cases: streaming guard, message index validation, group chat behavior
-8. [ ] Add CSS for button states and checkpoint indicator
-9. [ ] Register `/retry` and `/retryclear` slash commands
-10. [ ] Test with KoboldCpp backend (Text Completion API — the primary use case)
-11. [ ] Test with a Chat Completion API to confirm Continue behaves the same way
-12. [ ] Test persistence: set a checkpoint, refresh the page, verify it loads correctly
-
+4. [ ] Implement `doRetry()` — snapshot creation, swipe creation, Continue trigger
+5. [ ] Implement `createSnapshotSwipeAndContinue()` — add swipe to `msg.swipes[]`, switch to it, save chat, trigger Continue
+6. [ ] Implement `reRenderMessage()` — update DOM text and swipe counter after programmatic swipe creation
+7. [ ] Implement `triggerContinue()` — test with `/continue` slash command first
+8. [ ] Subscribe to events: `CHAT_CHANGED`, `USER_MESSAGE_RENDERED`, `CHARACTER_MESSAGE_RENDERED`, `MESSAGE_EDITED`
+9. [ ] Handle edge cases: streaming guard, message index validation, group chat behavior
+10. [ ] Add CSS for button states and checkpoint indicator
+11. [ ] Register `/retry` and `/retryclear` slash commands
 ---
 
 ## Key SillyTavern APIs Referenced
@@ -617,8 +651,6 @@ Add a minimal settings panel in the Extensions drawer:
 ---
 
 ## Development Notes
-
-- **Test in browser console first.** Before writing the extension, open ST in the browser, press F12, and run `SillyTavern.getContext()` to explore the available API surface. Check what functions exist for triggering Continue, saving chats, and subscribing to events. The API surface evolves between ST releases.
 - **The chat array is mutable.** You can directly modify `context.chat[n].mes` and it will be reflected when the chat is saved. But you must also update the DOM separately — ST doesn't auto-render on chat array changes.
 - **`messageFormatting` may not be exposed.** If it's not available on the context object, you can use ST's internal `mesFormatting()` function if importable, or fall back to setting `.innerText` and letting ST's markdown processor handle it on the next render cycle.
 - **Place the extension in:** `SillyTavern/data/<user>/extensions/SillyTavern-RetryContinue/` (current-user install) or `SillyTavern/public/scripts/extensions/third-party/SillyTavern-RetryContinue/` (all-users install).
