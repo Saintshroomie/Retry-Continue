@@ -1,0 +1,58 @@
+/* Retry Continue button */
+#option_retry_continue {
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.15s ease, color 0.15s ease;
+    font-size: 1.1em;
+    padding: 2px 5px;
+}
+
+#option_retry_continue:hover {
+    opacity: 1;
+}
+
+/* Active state — checkpoint is set */
+#option_retry_continue.retry-active {
+    opacity: 1;
+    color: var(--SmartThemeQuoteColor, #e8a23a);
+    position: relative;
+}
+
+#option_retry_continue.retry-active::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--SmartThemeQuoteColor, #e8a23a);
+}
+
+/* Message indicator: colored left border */
+.mes.retry-checkpoint-border {
+    border-left: 3px solid var(--SmartThemeQuoteColor, #e8a23a) !important;
+}
+
+/* Message indicator: bookmark icon */
+.retry-checkpoint-indicator {
+    margin-left: 6px;
+    color: var(--SmartThemeQuoteColor, #e8a23a);
+    font-size: 0.85em;
+    vertical-align: middle;
+}
+
+/* Settings panel spacing */
+#retry_continue_settings .inline-drawer-content label {
+    display: block;
+    margin: 6px 0;
+}
+
+#retry_continue_settings .inline-drawer-content select {
+    margin-top: 4px;
+}
+
+#retry_continue_settings #retry_clear_checkpoint {
+    margin-top: 10px;
+}
