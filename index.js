@@ -14,6 +14,10 @@ let retryState = {
     retryCount: 0,
 };
 
+// Guard flag: when true, MESSAGE_EDITED will not overwrite the snapshot.
+// This prevents continue/generation from silently updating the checkpoint.
+let snapshotLocked = false;
+
 // Extension settings with defaults
 const defaultSettings = {
     autoSetOnContinue: false,
@@ -153,6 +157,7 @@ async function createSnapshotSwipeAndContinue(lastMsg, lastMsgIndex) {
 
     // Trigger Continue to generate from the snapshot
     toast('Retrying from checkpoint...');
+    snapshotLocked = true;
     await triggerContinue();
 }
 
@@ -223,9 +228,11 @@ function addRetryButton() {
 
     const retryButton = document.createElement('div');
     retryButton.id = 'option_retry_continue';
-    retryButton.classList.add('fa-solid', 'fa-arrow-rotate-right', 'interactable');
+    retryButton.classList.add('list-group-item', 'interactable');
     retryButton.title = 'Retry Continue — regenerate from checkpoint';
     retryButton.tabIndex = 0;
+    retryButton.setAttribute('data-i18n', 'Retry');
+    retryButton.innerHTML = '<span class="fa-solid fa-arrow-rotate-right"></span> Retry';
 
     // Insert after the Continue button
     const continueButton = document.getElementById('option_continue');
@@ -245,18 +252,45 @@ function addRetryButton() {
     });
 }
 
+function addQuickRetryButton() {
+    const rightSendForm = document.getElementById('rightSendForm');
+    if (!rightSendForm) return;
+
+    // Don't add twice
+    if (document.getElementById('quick_retry_continue')) return;
+
+    const quickBtn = document.createElement('div');
+    quickBtn.id = 'quick_retry_continue';
+    quickBtn.classList.add('fa-solid', 'fa-arrow-rotate-right', 'interactable');
+    quickBtn.title = 'Retry Continue — regenerate from checkpoint';
+    quickBtn.tabIndex = 0;
+
+    rightSendForm.appendChild(quickBtn);
+
+    quickBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        await doRetry();
+    });
+}
+
 // ─── UI: Button Visuals ──────────────────────────────────────────────
 
 function updateButtonVisuals() {
-    const btn = document.getElementById('option_retry_continue');
-    if (!btn) return;
+    const buttons = [
+        document.getElementById('option_retry_continue'),
+        document.getElementById('quick_retry_continue'),
+    ];
 
-    if (retryState.active) {
-        btn.classList.add('retry-active');
-        btn.title = `Retry Continue (checkpoint active, ${retryState.retryCount} retries)`;
-    } else {
-        btn.classList.remove('retry-active');
-        btn.title = 'Retry Continue — regenerate from checkpoint';
+    for (const btn of buttons) {
+        if (!btn) continue;
+        if (retryState.active) {
+            btn.classList.add('retry-active');
+            btn.title = `Retry Continue (checkpoint active, ${retryState.retryCount} retries)`;
+        } else {
+            btn.classList.remove('retry-active');
+            btn.title = 'Retry Continue — regenerate from checkpoint';
+        }
     }
 }
 
@@ -440,6 +474,7 @@ function hookAutoContinue() {
         retryState.messageId = chat.length - 1;
         retryState.snapshotText = lastMsg.mes;
         retryState.retryCount = 0;
+        snapshotLocked = true;
         saveRetryState();
         updateButtonVisuals();
         updateMessageIndicator();
@@ -486,9 +521,12 @@ function subscribeToEvents() {
     });
 
     // Message edited — update snapshot if it's the snapshotted message
+    // Skip if snapshot is locked (edit came from generation, not the user)
     eventSource.on(eventTypes.MESSAGE_EDITED, (messageId) => {
+        if (snapshotLocked) return;
+        const ctx = SillyTavern.getContext();
+        if (ctx.isGenerating) return;
         if (retryState.active && parseInt(messageId) === retryState.messageId) {
-            const ctx = SillyTavern.getContext();
             const msg = ctx.chat[retryState.messageId];
             if (msg) {
                 retryState.snapshotText = msg.mes;
@@ -498,8 +536,9 @@ function subscribeToEvents() {
         }
     });
 
-    // After generation completes, update visuals
+    // After generation completes, unlock snapshot and update visuals
     eventSource.on(eventTypes.MESSAGE_RECEIVED, () => {
+        snapshotLocked = false;
         updateButtonVisuals();
         updateMessageIndicator();
     });
@@ -510,6 +549,7 @@ function subscribeToEvents() {
 function init() {
     loadExtensionSettings();
     addRetryButton();
+    addQuickRetryButton();
     addSettingsPanel();
     registerSlashCommands();
     hookAutoContinue();

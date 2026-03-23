@@ -1,10 +1,8 @@
-/* Retry Continue button */
+/* Retry Continue button (hamburger menu item) */
 #option_retry_continue {
     cursor: pointer;
     opacity: 0.7;
     transition: opacity 0.15s ease, color 0.15s ease;
-    font-size: 1.1em;
-    padding: 2px 5px;
 }
 
 #option_retry_continue:hover {
@@ -15,10 +13,28 @@
 #option_retry_continue.retry-active {
     opacity: 1;
     color: var(--SmartThemeQuoteColor, #e8a23a);
+}
+
+/* Retry Continue quick-action button */
+#quick_retry_continue {
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.15s ease, color 0.15s ease;
+    font-size: 1.1em;
+    padding: 2px 5px;
     position: relative;
 }
 
-#option_retry_continue.retry-active::after {
+#quick_retry_continue:hover {
+    opacity: 1;
+}
+
+#quick_retry_continue.retry-active {
+    opacity: 1;
+    color: var(--SmartThemeQuoteColor, #e8a23a);
+}
+
+#quick_retry_continue.retry-active::after {
     content: '';
     position: absolute;
     bottom: -2px;
