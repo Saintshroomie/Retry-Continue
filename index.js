@@ -323,6 +323,18 @@ function updateMessageIndicator() {
     }
 }
 
+// ─── UI: Quick Button Visibility During Generation ──────────────────
+
+function hideQuickRetryButton() {
+    const quickBtn = document.getElementById('quick_retry_continue');
+    if (quickBtn) quickBtn.style.display = 'none';
+}
+
+function showQuickRetryButton() {
+    const quickBtn = document.getElementById('quick_retry_continue');
+    if (quickBtn) quickBtn.style.display = '';
+}
+
 // ─── Settings Panel ──────────────────────────────────────────────────
 
 function addSettingsPanel() {
@@ -536,12 +548,32 @@ function subscribeToEvents() {
         }
     });
 
-    // After generation completes, unlock snapshot and update visuals
+    // After generation completes, unlock snapshot (with delay) and update visuals.
+    // The delay ensures any post-generation MESSAGE_EDITED events are still
+    // blocked, preventing the snapshot from being overwritten with the
+    // completed (post-continue) text.
     eventSource.on(eventTypes.MESSAGE_RECEIVED, () => {
-        snapshotLocked = false;
+        setTimeout(() => {
+            snapshotLocked = false;
+        }, 1000);
         updateButtonVisuals();
         updateMessageIndicator();
+        showQuickRetryButton();
     });
+
+    // Hide the quick-action Retry button while generation is active
+    if (eventTypes.GENERATION_STARTED) {
+        eventSource.on(eventTypes.GENERATION_STARTED, () => {
+            hideQuickRetryButton();
+        });
+    }
+
+    // Show the quick-action Retry button when generation ends
+    if (eventTypes.GENERATION_ENDED) {
+        eventSource.on(eventTypes.GENERATION_ENDED, () => {
+            showQuickRetryButton();
+        });
+    }
 }
 
 // ─── Initialization ──────────────────────────────────────────────────
