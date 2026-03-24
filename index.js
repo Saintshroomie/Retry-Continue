@@ -74,7 +74,7 @@ function resetRetryState() {
 
 function debug(...args) {
     if (!extensionSettings.debugMode) return;
-    console.log('[RetryContinue]', ...args);
+    console.log('RETRY-CONTINUE:', ...args);
 }
 
 // ─── Toast Helper ────────────────────────────────────────────────────
@@ -445,7 +445,7 @@ function addSettingsPanel() {
         debugCheck.addEventListener('change', () => {
             extensionSettings.debugMode = debugCheck.checked;
             saveExtensionSettings();
-            console.log('[RetryContinue] Debug mode', extensionSettings.debugMode ? 'enabled' : 'disabled');
+            console.log('RETRY-CONTINUE: Debug mode', extensionSettings.debugMode ? 'enabled' : 'disabled');
         });
     }
 
