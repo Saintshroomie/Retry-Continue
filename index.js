@@ -61,7 +61,7 @@ function loadRetryState() {
 }
 
 function resetRetryState() {
-    debug('resetRetryState: clearing all state');
+    debug('resetRetryState: clearing all state | old: { active:', retryState.active, ', messageId:', retryState.messageId, ', snapshotLength:', retryState.snapshotText?.length ?? 0, ', retryCount:', retryState.retryCount, '}');
     retryState = {
         active: false,
         messageId: null,
@@ -118,7 +118,9 @@ async function doRetry() {
 
     if (!retryState.active) {
         // First retry: establish snapshot
-        debug('doRetry: first retry — setting checkpoint, snapshotLength =', lastMsg.mes.length);
+        debug('doRetry: first retry — setting checkpoint',
+            '| old: { active:', retryState.active, ', messageId:', retryState.messageId, ', snapshotLength:', retryState.snapshotText?.length ?? 0, ', retryCount:', retryState.retryCount, '}',
+            '| new: { active: true, messageId:', lastMsgIndex, ', snapshotLength:', lastMsg.mes.length, ', retryCount: 0 }');
         retryState.active = true;
         retryState.messageId = lastMsgIndex;
         retryState.snapshotText = lastMsg.mes;
@@ -530,7 +532,9 @@ function hookAutoContinue() {
         const lastMsg = chat[chat.length - 1];
         if (!lastMsg) return;
 
-        debug('hookAutoContinue: auto-setting checkpoint at msgIndex =', chat.length - 1, '| snapshotLength =', lastMsg.mes.length);
+        debug('hookAutoContinue: auto-setting checkpoint',
+            '| old: { active:', retryState.active, ', messageId:', retryState.messageId, ', snapshotLength:', retryState.snapshotText?.length ?? 0, ', retryCount:', retryState.retryCount, '}',
+            '| new: { active: true, messageId:', chat.length - 1, ', snapshotLength:', lastMsg.mes.length, ', retryCount: 0 }');
         retryState.active = true;
         retryState.messageId = chat.length - 1;
         retryState.snapshotText = lastMsg.mes;
