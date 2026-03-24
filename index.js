@@ -83,12 +83,8 @@ async function doRetry() {
         return;
     }
 
-    // Guard: last message must be from the character
     const lastMsg = chat[chat.length - 1];
-    if (!lastMsg || lastMsg.is_user) {
-        toast('Retry requires the last message to be from the character.', 'warning');
-        return;
-    }
+    if (!lastMsg) return;
 
     // Guard: no generation in progress
     if (context.isGenerating) {
@@ -105,7 +101,7 @@ async function doRetry() {
         retryState.snapshotText = lastMsg.mes;
         retryState.retryCount = 0;
         saveRetryState();
-        toast('Retry checkpoint set.');
+        toast(lastMsg.is_user ? 'User message checkpoint set — continuing...' : 'Retry checkpoint set.');
     } else {
         // Subsequent retry: validate snapshot still applies
         if (retryState.messageId !== lastMsgIndex) {
@@ -480,7 +476,7 @@ function hookAutoContinue() {
         if (!chat || chat.length === 0) return;
 
         const lastMsg = chat[chat.length - 1];
-        if (!lastMsg || lastMsg.is_user) return;
+        if (!lastMsg) return;
 
         retryState.active = true;
         retryState.messageId = chat.length - 1;
@@ -506,8 +502,11 @@ function subscribeToEvents() {
         loadRetryState();
     });
 
-    // User sends a new message — clear snapshot
+    // User sends a new message — clear snapshot.
+    // Skip if a user-message retry is currently in progress (snapshotLocked),
+    // since the continue may cause the user message to re-render.
     eventSource.on(eventTypes.USER_MESSAGE_RENDERED, () => {
+        if (retryState.active && snapshotLocked) return;
         if (retryState.active) {
             resetRetryState();
             saveRetryState();
