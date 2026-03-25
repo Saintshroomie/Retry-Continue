@@ -513,38 +513,50 @@ function registerSlashCommands() {
 
 // ─── Auto-Set on Continue (optional feature) ─────────────────────────
 
+function autoSetCheckpointOnContinue() {
+    debug('autoSetCheckpointOnContinue: invoked | autoSetOnContinue =', extensionSettings.autoSetOnContinue, '| retryState.active =', retryState.active);
+    if (!extensionSettings.autoSetOnContinue) return;
+    if (retryState.active) {
+        debug('autoSetCheckpointOnContinue: already have a checkpoint, skipping');
+        return;
+    }
+
+    const context = SillyTavern.getContext();
+    const chat = context.chat;
+    if (!chat || chat.length === 0) return;
+
+    const lastMsg = chat[chat.length - 1];
+    if (!lastMsg) return;
+
+    debug('autoSetCheckpointOnContinue: auto-setting checkpoint',
+        '| old: { active:', retryState.active, ', messageId:', retryState.messageId, ', snapshotLength:', retryState.snapshotText?.length ?? 0, ', retryCount:', retryState.retryCount, '}',
+        '| new: { active: true, messageId:', chat.length - 1, ', snapshotLength:', lastMsg.mes.length, ', retryCount: 0 }');
+    retryState.active = true;
+    retryState.messageId = chat.length - 1;
+    retryState.snapshotText = lastMsg.mes;
+    retryState.retryCount = 0;
+    snapshotLocked = true;
+    saveRetryState();
+    updateButtonVisuals();
+    updateMessageIndicator();
+    toast('Retry checkpoint auto-set from Continue.');
+}
+
 function hookAutoContinue() {
+    // Hook the hamburger menu Continue button
     const continueButton = document.getElementById('option_continue');
-    if (!continueButton) return;
+    if (continueButton) {
+        continueButton.addEventListener('click', () => autoSetCheckpointOnContinue());
+    }
 
-    continueButton.addEventListener('click', () => {
-        debug('hookAutoContinue: Continue button clicked | autoSetOnContinue =', extensionSettings.autoSetOnContinue, '| retryState.active =', retryState.active);
-        if (!extensionSettings.autoSetOnContinue) return;
-        if (retryState.active) {
-            debug('hookAutoContinue: already have a checkpoint, skipping');
-            return;
+    // Hook the quick Continue button in the right send form
+    const rightSendForm = document.getElementById('rightSendForm');
+    if (rightSendForm) {
+        const quickContinueBtn = rightSendForm.querySelector('.mes_continue');
+        if (quickContinueBtn) {
+            quickContinueBtn.addEventListener('click', () => autoSetCheckpointOnContinue());
         }
-
-        const context = SillyTavern.getContext();
-        const chat = context.chat;
-        if (!chat || chat.length === 0) return;
-
-        const lastMsg = chat[chat.length - 1];
-        if (!lastMsg) return;
-
-        debug('hookAutoContinue: auto-setting checkpoint',
-            '| old: { active:', retryState.active, ', messageId:', retryState.messageId, ', snapshotLength:', retryState.snapshotText?.length ?? 0, ', retryCount:', retryState.retryCount, '}',
-            '| new: { active: true, messageId:', chat.length - 1, ', snapshotLength:', lastMsg.mes.length, ', retryCount: 0 }');
-        retryState.active = true;
-        retryState.messageId = chat.length - 1;
-        retryState.snapshotText = lastMsg.mes;
-        retryState.retryCount = 0;
-        snapshotLocked = true;
-        saveRetryState();
-        updateButtonVisuals();
-        updateMessageIndicator();
-        toast('Retry checkpoint auto-set from Continue.');
-    });
+    }
 }
 
 // ─── Event Subscriptions ─────────────────────────────────────────────
