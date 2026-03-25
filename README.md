@@ -29,7 +29,6 @@ A UI extension that adds a **Retry** button to SillyTavern's quick-action bar. R
 
 Found in the **Extensions** drawer under **Retry Continue**:
 
-- **Auto-set checkpoint on Continue** — Automatically create a checkpoint when you use the regular Continue button.
 - **Show toast notifications** — Toggle notification messages on/off.
 - **Checkpoint indicator style** — Choose how the checkpointed message is visually marked (border, icon, or none).
 
