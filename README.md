@@ -39,7 +39,3 @@ Found in the **Extensions** drawer under **Retry Continue**:
 - **Subsequent Retries**: Creates another new swipe from the same snapshot and triggers Continue again.
 - **Snapshot clears** when any new message is added to the chat, you switch chats, or you manually clear it.
 - **Editing** the checkpointed message updates the snapshot automatically.
-
-## Author
-
-Chris Phifer
