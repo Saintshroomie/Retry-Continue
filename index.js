@@ -126,12 +126,12 @@ async function doRetry() {
         retryState.snapshotText = lastMsg.mes;
         retryState.retryCount = 0;
         saveRetryState();
-        toast(lastMsg.is_user ? 'User message checkpoint set — continuing...' : 'Retry checkpoint set.');
+        toast('Retry checkpoint set.');
     } else {
         // Subsequent retry: validate snapshot still applies
         if (retryState.messageId !== lastMsgIndex) {
             debug('doRetry: messageId mismatch — expected', retryState.messageId, 'but got', lastMsgIndex, ', resetting');
-            toast('Message context has changed. Resetting retry checkpoint.', 'warning');
+            toast('Checkpoint Invalid. Resetting retry checkpoint.', 'warning');
             resetRetryState();
             saveRetryState();
             updateButtonVisuals();
@@ -158,7 +158,7 @@ async function createSnapshotSwipeAndContinue(lastMsg, lastMsgIndex) {
     // Ensure the message has a swipes array
     if (!lastMsg.swipes) {
         debug('createSnapshotSwipeAndContinue: initializing swipes array');
-        lastMsg.swipes = [lastMsg.mes];
+        lastMsg.swipes = [lastMsg.mes]; // swipe 0 is the original message
         lastMsg.swipe_id = 0;
         lastMsg.swipe_info = [{}];
     }
@@ -238,12 +238,12 @@ async function triggerContinue() {
     }
 
     // Approach 2: Click the Continue button
-    const continueButton = document.getElementById('option_continue');
-    if (continueButton) {
-        debug('triggerContinue: falling back to button click');
-        continueButton.click();
-        return;
-    }
+    // const continueButton = document.getElementById('option_continue');
+    // if (continueButton) {
+    //     debug('triggerContinue: falling back to button click');
+    //     continueButton.click();
+    //     return;
+    // }
 
     debug('triggerContinue: no continue method available');
     toast('Could not trigger Continue. Is the Continue button enabled?', 'error');
@@ -335,6 +335,7 @@ function updateMessageIndicator() {
         el.classList.remove('retry-checkpoint-border');
     });
 
+    // Do nothing if we're inactive or if indicators are turned off.
     if (!retryState.active || extensionSettings.indicatorStyle === 'none') return;
 
     const messageElement = document.querySelector(
@@ -514,24 +515,26 @@ function registerSlashCommands() {
 // ─── Auto-Set on Continue (optional feature) ─────────────────────────
 
 function hookAutoContinue() {
-    const continueButton = document.getElementById('option_continue');
-    if (!continueButton) return;
-
-    continueButton.addEventListener('click', () => {
+    const buttons = [
+        document.getElementById('option_continue'),
+        document.getElementyById('stscript_continue'),
+    ];
+    const autoSetOnContinue = () => {
         debug('hookAutoContinue: Continue button clicked | autoSetOnContinue =', extensionSettings.autoSetOnContinue, '| retryState.active =', retryState.active);
         if (!extensionSettings.autoSetOnContinue) return;
-        if (retryState.active) {
-            debug('hookAutoContinue: already have a checkpoint, skipping');
-            return;
-        }
-
+        
+        // if (retryState.active) {
+        //     debug('hookAutoContinue: already have a checkpoint, skipping');
+        //     return;
+        // }
+    
         const context = SillyTavern.getContext();
         const chat = context.chat;
         if (!chat || chat.length === 0) return;
-
+    
         const lastMsg = chat[chat.length - 1];
         if (!lastMsg) return;
-
+    
         debug('hookAutoContinue: auto-setting checkpoint',
             '| old: { active:', retryState.active, ', messageId:', retryState.messageId, ', snapshotLength:', retryState.snapshotText?.length ?? 0, ', retryCount:', retryState.retryCount, '}',
             '| new: { active: true, messageId:', chat.length - 1, ', snapshotLength:', lastMsg.mes.length, ', retryCount: 0 }');
@@ -544,7 +547,13 @@ function hookAutoContinue() {
         updateButtonVisuals();
         updateMessageIndicator();
         toast('Retry checkpoint auto-set from Continue.');
-    });
+    }
+
+    for (const btn of buttons) {
+        if (!btn) continue;
+        btn.addEventListener('click', autoSetOnContinue)
+    }
+    return;
 }
 
 // ─── Event Subscriptions ─────────────────────────────────────────────
@@ -622,16 +631,10 @@ function subscribeToEvents() {
         }
     });
 
-    // After generation completes, unlock snapshot (with delay) and update visuals.
-    // The delay ensures any post-generation MESSAGE_EDITED events are still
-    // blocked, preventing the snapshot from being overwritten with the
-    // completed (post-continue) text.
+    // After generation completes, unlock snapshot and update visuals.
     eventSource.on(eventTypes.MESSAGE_RECEIVED, () => {
-        debug('event: MESSAGE_RECEIVED — scheduling snapshotLocked = false (1000ms delay)');
-        setTimeout(() => {
-            snapshotLocked = false;
-            debug('event: MESSAGE_RECEIVED — snapshotLocked = false (after delay)');
-        }, 1000);
+        debug('event: MESSAGE_RECEIVED — scheduling snapshotLocked = false');
+        snapshotLocked = false;        
         updateButtonVisuals();
         updateMessageIndicator();
         showQuickRetryButton();
