@@ -20,6 +20,7 @@ let snapshotLocked = false;
 
 // Extension settings with defaults
 const defaultSettings = {
+    autoSetOnContinue: false,
     showToasts: true,
     indicatorStyle: 'border', // 'border' | 'icon' | 'none'
     debugMode: false,
@@ -381,6 +382,10 @@ function addSettingsPanel() {
             </div>
             <div class="inline-drawer-content">
                 <label class="checkbox_label">
+                    <input id="retry_auto_continue" type="checkbox" />
+                    <span>Auto-set checkpoint on Continue</span>
+                </label>
+                <label class="checkbox_label">
                     <input id="retry_show_toasts" type="checkbox" />
                     <span>Show toast notifications</span>
                 </label>
@@ -406,9 +411,18 @@ function addSettingsPanel() {
     settingsContainer.insertAdjacentHTML('beforeend', html);
 
     // Bind controls
+    const autoCheck = document.getElementById('retry_auto_continue');
     const toastCheck = document.getElementById('retry_show_toasts');
     const styleSelect = document.getElementById('retry_indicator_style');
     const clearBtn = document.getElementById('retry_clear_checkpoint');
+
+    if (autoCheck) {
+        autoCheck.checked = extensionSettings.autoSetOnContinue;
+        autoCheck.addEventListener('change', () => {
+            extensionSettings.autoSetOnContinue = autoCheck.checked;
+            saveExtensionSettings();
+        });
+    }
 
     if (toastCheck) {
         toastCheck.checked = extensionSettings.showToasts;
@@ -495,6 +509,42 @@ function registerSlashCommands() {
         false,
         true,
     );
+}
+
+// ─── Auto-Set on Continue (optional feature) ─────────────────────────
+
+function hookAutoContinue() {
+    const continueButton = document.getElementById('option_continue');
+    if (!continueButton) return;
+
+    continueButton.addEventListener('click', () => {
+        debug('hookAutoContinue: Continue button clicked | autoSetOnContinue =', extensionSettings.autoSetOnContinue, '| retryState.active =', retryState.active);
+        if (!extensionSettings.autoSetOnContinue) return;
+        if (retryState.active) {
+            debug('hookAutoContinue: already have a checkpoint, skipping');
+            return;
+        }
+
+        const context = SillyTavern.getContext();
+        const chat = context.chat;
+        if (!chat || chat.length === 0) return;
+
+        const lastMsg = chat[chat.length - 1];
+        if (!lastMsg) return;
+
+        debug('hookAutoContinue: auto-setting checkpoint',
+            '| old: { active:', retryState.active, ', messageId:', retryState.messageId, ', snapshotLength:', retryState.snapshotText?.length ?? 0, ', retryCount:', retryState.retryCount, '}',
+            '| new: { active: true, messageId:', chat.length - 1, ', snapshotLength:', lastMsg.mes.length, ', retryCount: 0 }');
+        retryState.active = true;
+        retryState.messageId = chat.length - 1;
+        retryState.snapshotText = lastMsg.mes;
+        retryState.retryCount = 0;
+        snapshotLocked = true;
+        saveRetryState();
+        updateButtonVisuals();
+        updateMessageIndicator();
+        toast('Retry checkpoint auto-set from Continue.');
+    });
 }
 
 // ─── Event Subscriptions ─────────────────────────────────────────────
@@ -613,6 +663,7 @@ function init() {
     addQuickRetryButton();
     addSettingsPanel();
     registerSlashCommands();
+    hookAutoContinue();
     subscribeToEvents();
     loadRetryState();
     debug('init: complete');
