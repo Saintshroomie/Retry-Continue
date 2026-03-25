@@ -550,12 +550,9 @@ function hookAutoContinue() {
     }
 
     // Hook the quick Continue button in the right send form
-    const rightSendForm = document.getElementById('rightSendForm');
-    if (rightSendForm) {
-        const quickContinueBtn = rightSendForm.querySelector('#stscript_continue');
-        if (quickContinueBtn) {
-            quickContinueBtn.addEventListener('click', () => autoSetCheckpointOnContinue());
-        }
+    const quickContinueBtn = document.getElementById('mes_continue');
+    if (quickContinueBtn) {
+        quickContinueBtn.addEventListener('click', () => autoSetCheckpointOnContinue());
     }
 }
 
