@@ -18,6 +18,10 @@ let retryState = {
 // This prevents continue/generation from silently updating the checkpoint.
 let snapshotLocked = false;
 
+// Flag: when true, the next MESSAGE_RECEIVED will trigger a retry on the AI response.
+// Set when the user had input text and we sent it before retrying.
+let pendingRetryAfterGeneration = false;
+
 // Extension settings with defaults
 const defaultSettings = {
     showToasts: true,
@@ -92,6 +96,46 @@ async function doRetry() {
     const context = SillyTavern.getContext();
     const chat = context.chat;
 
+    // Guard: no generation in progress
+    if (context.isGenerating) {
+        debug('doRetry: generation in progress, aborting');
+        toast('Cannot retry while generation is in progress.', 'warning');
+        return;
+    }
+
+    // Check for user input in the textarea — if present, send it first,
+    // then retry after the AI responds.
+    const textarea = document.getElementById('send_textarea');
+    const userInput = textarea?.value?.trim();
+
+    if (userInput) {
+        debug('doRetry: user input detected, sending message first:', userInput.substring(0, 50));
+
+        // Reset any existing retry state
+        if (retryState.active) {
+            resetRetryState();
+            saveRetryState();
+            updateButtonVisuals();
+            updateMessageIndicator();
+        }
+
+        // Set flags so post-generation handlers trigger the retry
+        pendingRetryAfterGeneration = true;
+        snapshotLocked = true;
+
+        // Trigger the send button (textarea already has the text)
+        const sendButton = document.getElementById('send_but');
+        if (sendButton) {
+            sendButton.click();
+        } else {
+            debug('doRetry: send button not found, aborting');
+            toast('Could not find send button.', 'error');
+            pendingRetryAfterGeneration = false;
+            snapshotLocked = false;
+        }
+        return;
+    }
+
     // Guard: must have messages
     if (!chat || chat.length === 0) {
         debug('doRetry: no messages in chat, aborting');
@@ -102,13 +146,6 @@ async function doRetry() {
     const lastMsg = chat[chat.length - 1];
     if (!lastMsg) {
         debug('doRetry: lastMsg is falsy, aborting');
-        return;
-    }
-
-    // Guard: no generation in progress
-    if (context.isGenerating) {
-        debug('doRetry: generation in progress, aborting');
-        toast('Cannot retry while generation is in progress.', 'warning');
         return;
     }
 
@@ -246,6 +283,41 @@ async function triggerContinue() {
 
     debug('triggerContinue: no continue method available');
     toast('Could not trigger Continue. Is the Continue button enabled?', 'error');
+}
+
+// ─── Post-Send Retry (user message → AI retry) ─────────────────────
+
+async function doRetryAfterUserMessage() {
+    debug('doRetryAfterUserMessage: triggered');
+    const context = SillyTavern.getContext();
+    const chat = context.chat;
+
+    if (!chat || chat.length === 0) {
+        debug('doRetryAfterUserMessage: no messages, aborting');
+        return;
+    }
+
+    const lastMsg = chat[chat.length - 1];
+    const lastMsgIndex = chat.length - 1;
+
+    if (!lastMsg || lastMsg.is_user) {
+        debug('doRetryAfterUserMessage: last message is user or missing, aborting');
+        toast('Expected an AI response after sending your message.', 'warning');
+        return;
+    }
+
+    // Set checkpoint with empty snapshot — each retry regenerates the
+    // full AI response from scratch (continue from empty text).
+    retryState.active = true;
+    retryState.messageId = lastMsgIndex;
+    retryState.snapshotText = '';
+    retryState.retryCount = 1;
+
+    debug('doRetryAfterUserMessage: checkpoint set on message', lastMsgIndex, 'with empty snapshot');
+    saveRetryState();
+    updateButtonVisuals();
+
+    await createSnapshotSwipeAndContinue(lastMsg, lastMsgIndex);
 }
 
 // ─── UI: Button ──────────────────────────────────────────────────────
@@ -576,11 +648,22 @@ function subscribeToEvents() {
     // The delay ensures any post-generation MESSAGE_EDITED events are still
     // blocked, preventing the snapshot from being overwritten with the
     // completed (post-continue) text.
+    //
+    // If pendingRetryAfterGeneration is set, the user sent a message via
+    // the retry button and we now need to retry against the AI response.
     eventSource.on(eventTypes.MESSAGE_RECEIVED, () => {
         debug('event: MESSAGE_RECEIVED — scheduling snapshotLocked = false (1000ms delay)');
+        const shouldRetryAfterSend = pendingRetryAfterGeneration;
+        if (shouldRetryAfterSend) {
+            pendingRetryAfterGeneration = false;
+            debug('event: MESSAGE_RECEIVED — will trigger retry after user message send');
+        }
         setTimeout(() => {
             snapshotLocked = false;
             debug('event: MESSAGE_RECEIVED — snapshotLocked = false (after delay)');
+            if (shouldRetryAfterSend) {
+                doRetryAfterUserMessage();
+            }
         }, 1000);
         updateButtonVisuals();
         updateMessageIndicator();
