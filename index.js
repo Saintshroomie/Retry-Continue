@@ -114,6 +114,24 @@ async function doRetry() {
     confirmActiveMessageEdit();
 
     const context = SillyTavern.getContext();
+
+    // Guard: no generation in progress
+    if (context.isGenerating) {
+        debug('doRetry: generation in progress, aborting');
+        toast('Cannot retry while generation is in progress.', 'warning');
+        return;
+    }
+
+    // Check if the user has typed text in the input area
+    const textarea = document.getElementById('send_textarea');
+    const inputText = textarea?.value?.trim();
+
+    if (inputText) {
+        debug('doRetry: input text detected, length =', inputText.length);
+        await handleTypedMessageRetry(inputText);
+        return;
+    }
+
     const chat = context.chat;
 
     // Guard: must have messages
@@ -126,13 +144,6 @@ async function doRetry() {
     const lastMsg = chat[chat.length - 1];
     if (!lastMsg) {
         debug('doRetry: lastMsg is falsy, aborting');
-        return;
-    }
-
-    // Guard: no generation in progress
-    if (context.isGenerating) {
-        debug('doRetry: generation in progress, aborting');
-        toast('Cannot retry while generation is in progress.', 'warning');
         return;
     }
 
@@ -170,6 +181,66 @@ async function doRetry() {
     updateButtonVisuals();
 
     await createSnapshotSwipeAndContinue(lastMsg, lastMsgIndex);
+}
+
+// ─── Typed Message Retry ────────────────────────────────────────────
+
+/**
+ * Handles the case where the user has text in the input area when pressing
+ * retry-continue. The typed text becomes the checkpoint, then #mes_continue
+ * is clicked which natively posts the message and continues it.
+ */
+async function handleTypedMessageRetry(inputText) {
+    const context = SillyTavern.getContext();
+    const { eventSource, eventTypes } = context;
+
+    debug('handleTypedMessageRetry: setting checkpoint from input text, length =', inputText.length);
+
+    // Lock snapshot so USER_MESSAGE_RENDERED doesn't clear our state
+    snapshotLocked = true;
+
+    // Set up retry state with the typed text as the checkpoint.
+    // messageId will be updated once the user message renders.
+    retryState.active = true;
+    retryState.snapshotText = inputText;
+    retryState.retryCount = 1;
+    retryState.messageId = null;
+
+    // Listen for the user message to capture its index
+    const onUserMessage = () => {
+        eventSource.removeListener(eventTypes.USER_MESSAGE_RENDERED, onUserMessage);
+        const ctx = SillyTavern.getContext();
+        retryState.messageId = ctx.chat.length - 1;
+        debug('handleTypedMessageRetry: USER_MESSAGE_RENDERED — messageId set to', retryState.messageId);
+        saveRetryState();
+        updateButtonVisuals();
+        updateMessageIndicator();
+    };
+    eventSource.on(eventTypes.USER_MESSAGE_RENDERED, onUserMessage);
+
+    // Click the Continue button directly — it handles posting the typed
+    // message and continuing it natively, unlike the /continue slash command.
+    toast('Message checkpoint set — continuing...');
+    debug('handleTypedMessageRetry: clicking #mes_continue');
+    const mesContinueBtn = document.getElementById('mes_continue');
+    if (mesContinueBtn) {
+        mesContinueBtn.click();
+        return;
+    }
+
+    // Fallback to the hamburger menu Continue button
+    debug('handleTypedMessageRetry: #mes_continue not found, trying #option_continue');
+    const optionContinueBtn = document.getElementById('option_continue');
+    if (optionContinueBtn) {
+        optionContinueBtn.click();
+        return;
+    }
+
+    debug('handleTypedMessageRetry: no continue button found, aborting');
+    toast('Could not find Continue button.', 'error');
+    snapshotLocked = false;
+    resetRetryState();
+    eventSource.removeListener(eventTypes.USER_MESSAGE_RENDERED, onUserMessage);
 }
 
 // ─── Swipe Creation & Continue ───────────────────────────────────────
