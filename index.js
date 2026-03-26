@@ -108,7 +108,7 @@ async function doRetry() {
     debug('doRetry: invoked');
 
     // Auto-confirm any in-progress message edit
-    confirmActiveMessageEdit();
+    // confirmActiveMessageEdit();
 
     const context = SillyTavern.getContext();
     const chat = context.chat;
