@@ -111,7 +111,7 @@ async function doRetry() {
     debug('doRetry: invoked');
 
     // Auto-confirm any in-progress message edit
-    confirmActiveMessageEdit();
+    const editWasActive = confirmActiveMessageEdit();
 
     const context = SillyTavern.getContext();
 
@@ -172,6 +172,16 @@ async function doRetry() {
             updateMessageIndicator();
             return;
         }
+        // If we auto-confirmed an edit on the checkpointed message, update
+        // the snapshot now. ST updates chat[N].mes synchronously on edit
+        // confirm, but the MESSAGE_EDITED event fires asynchronously — so
+        // we can't rely on the event handler having run yet.
+        if (editWasActive) {
+            debug('doRetry: edit was auto-confirmed — updating snapshot to edited text, length =', lastMsg.mes.length);
+            retryState.snapshotText = lastMsg.mes;
+            saveRetryState();
+        }
+
         debug('doRetry: subsequent retry — checkpoint still valid');
     }
 
