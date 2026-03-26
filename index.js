@@ -93,11 +93,14 @@ function toast(message, type = 'info') {
  * confirm the edit so the message exits editing state before we proceed.
  */
 function confirmActiveMessageEdit() {
-    const editDoneBtn = document.querySelector('#chat .mes .mes_edit_done:not([style*="display: none"])');
-    if (editDoneBtn) {
-        debug('confirmActiveMessageEdit: found active edit, clicking confirm');
-        editDoneBtn.click();
-        return true;
+    const visibleEditButtons = document.querySelector('#chat .mes .mes_edit_buttons[style*="display: inline-flex"]');
+    if (visibleEditButtons) {
+        const editDoneBtn = visibleEditButtons.querySelector('.mes_edit_done');
+        if (editDoneBtn) {
+            debug('confirmActiveMessageEdit: found active edit, clicking confirm');
+            editDoneBtn.click();
+            return true;
+        }
     }
     return false;
 }
