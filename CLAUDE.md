@@ -10,7 +10,8 @@
 ├── manifest.json   # Extension metadata (required)
 ├── index.js        # All extension logic — single entry point
 ├── style.css       # UI styling using ST's CSS variable system
-└── README.md       # User-facing documentation
+├── README.md       # User-facing documentation
+└── CLAUDE.md       # AI development guide (this file)
 ```
 
 ---
@@ -151,15 +152,123 @@ eventSource.on(eventTypes.MESSAGE_EDITED, (messageId) => { /* ... */ });
 
 ### Key Event Types
 
-| Event | Fires When | Typical Use |
-|-------|-----------|-------------|
-| `CHAT_CHANGED` | User switches to a different chat | Load per-chat state |
-| `USER_MESSAGE_RENDERED` | User message appears in chat | Clear/reset extension state |
-| `CHARACTER_MESSAGE_RENDERED` | Character message appears | Detect new turns vs. continues |
-| `MESSAGE_EDITED` | Any message is edited | Update cached text (param: `messageId`) |
-| `MESSAGE_RECEIVED` | Generation completes, message received | Post-generation cleanup |
-| `GENERATION_STARTED` | Generation begins | Hide buttons, set guards |
-| `GENERATION_ENDED` | Generation finishes | Show buttons, unlock state |
+SillyTavern defines **86+ event types** in `public/scripts/events.js`. The most useful ones for extension development are listed below, organized by category. Parameter info is derived from source code `emit()` calls.
+
+> **Note**: The way each event passes data to listeners is not uniform. Some events pass no data; others pass an object, index, or string. Always check current source if in doubt.
+
+#### Core Message Events
+
+| Event | Fires When | Params | Typical Use |
+|-------|-----------|--------|-------------|
+| `USER_MESSAGE_RENDERED` | User message rendered in DOM | `(messageIndex)` | Clear/reset extension state |
+| `CHARACTER_MESSAGE_RENDERED` | Character message rendered in DOM | `(messageIndex)` | Detect new turns vs. continues |
+| `MESSAGE_SENT` | User message recorded in chat array (before render) | `(messageIndex)` | Pre-processing before display |
+| `MESSAGE_RECEIVED` | LLM message recorded in chat array (before render) | `(messageIndex)` | Post-generation cleanup, unlock guards |
+| `MESSAGE_EDITED` | Any message edited (user, generation, or programmatic) | `(messageId)` **string!** | Update cached text — use `parseInt(messageId)` |
+| `MESSAGE_DELETED` | A message is deleted from chat | `(messageCount)` | Clean up references (param is remaining count, not deleted ID) |
+| `MESSAGE_SWIPED` | User swipes to a different response | — | React to swipe navigation |
+| `MESSAGE_UPDATED` | Message object is updated/modified | `(messageIndex)` | Respond to non-edit content changes |
+| `MESSAGE_FILE_EMBEDDED` | A file is embedded in a message | `(messageIndex)` | Handle file attachments |
+| `MESSAGE_SWIPE_DELETED` | A swipe variant is deleted | `(messageIndex)` | Clean up swipe-related state |
+| `MESSAGE_REASONING_EDITED` | Reasoning/thinking portion edited | `(messageIndex)` | Track chain-of-thought changes |
+| `MESSAGE_REASONING_DELETED` | Reasoning/thinking portion deleted | `(messageIndex)` | Clean up reasoning UI |
+| `IMPERSONATE_READY` | Impersonated message text is ready | `(messageText)` | Modify impersonated text |
+
+#### Generation Events
+
+| Event | Fires When | Params | Typical Use |
+|-------|-----------|--------|-------------|
+| `GENERATION_STARTED` | Generation request sent to backend | — | Hide buttons, set guard flags |
+| `GENERATION_ENDED` | Generation finishes (success or failure) | — | Show buttons, unlock state |
+| `GENERATION_STOPPED` | User manually stops/aborts generation | — | Handle interrupted generation |
+| `GENERATION_AFTER_COMMANDS` | After slash commands processed, before gen | `(type, options, dryRun)` | Modify generation parameters |
+| `GENERATE_BEFORE_COMBINE_PROMPTS` | Before prompt parts are combined | `(data)` mutable | Modify prompt assembly |
+| `GENERATE_AFTER_COMBINE_PROMPTS` | After prompts are combined | `(data)` mutable | Inspect/modify final prompt |
+| `GENERATE_AFTER_DATA` | After generation request data is built | `(data)` mutable | Last chance to modify API payload |
+| `STREAM_TOKEN_RECEIVED` | Each token arrives during streaming | `(token)` | Real-time streaming UI updates |
+| `SMOOTH_STREAM_TOKEN_RECEIVED` | Deprecated alias for `STREAM_TOKEN_RECEIVED` | `(token)` | Same string value — use `STREAM_TOKEN_RECEIVED` |
+| `STREAM_REASONING_DONE` | Reasoning/thinking stream portion complete | — | Switch from reasoning to response display |
+
+#### Chat & Session Events
+
+| Event | Fires When | Params | Typical Use |
+|-------|-----------|--------|-------------|
+| `CHAT_CHANGED` | User switches to a different chat | `(chatId)` | Load per-chat state from metadata |
+| `CHAT_LOADED` | Chat data loaded into memory | — | Post-load initialization |
+| `CHAT_CREATED` | A new chat is created | `(chatId)` | Initialize fresh state |
+| `CHAT_DELETED` | A chat is deleted | `(chatFileName)` | Clean up associated data |
+| `GROUP_CHAT_CREATED` | A group chat is created | `(chatId)` | Group-specific initialization |
+| `GROUP_CHAT_DELETED` | A group chat is deleted | `(chatId)` | Group cleanup |
+| `GROUP_UPDATED` | Group settings or members changed | — | React to group changes |
+| `GROUP_MEMBER_DRAFTED` | Group member selected for next turn | `(characterId)` | Track group generation order |
+| `MORE_MESSAGES_LOADED` | Older messages loaded (scrollback) | — | Re-apply indicators to loaded messages |
+
+#### Character Events
+
+| Event | Fires When | Params | Typical Use |
+|-------|-----------|--------|-------------|
+| `CHARACTER_EDITOR_OPENED` | Character editor panel opens | — | Add custom editor UI |
+| `CHARACTER_EDITED` | Character card is modified and saved | `(characterData)` | React to character changes |
+| `CHARACTER_DELETED` | A character is deleted | `(characterData)` | Clean up character-specific data |
+| `CHARACTER_DUPLICATED` | A character is duplicated | `(characterId)` | Handle copied characters |
+| `CHARACTER_RENAMED` | A character is renamed | `(oldName, newName)` | Update name references |
+| `CHARACTER_FIRST_MESSAGE_SELECTED` | Alt first message chosen | `(index)` | Handle greeting variants |
+| `CHARACTER_PAGE_LOADED` | Character page finishes loading | — | Inject custom UI into character page |
+
+#### Settings & Configuration Events
+
+| Event | Fires When | Params | Typical Use |
+|-------|-----------|--------|-------------|
+| `SETTINGS_LOADED` | Settings finish loading | — | Read initial configuration |
+| `SETTINGS_LOADED_BEFORE` | Just before settings are applied | — | Pre-settings setup |
+| `SETTINGS_LOADED_AFTER` | After settings fully applied and UI updated | — | Post-settings initialization |
+| `SETTINGS_UPDATED` | Any setting is changed | — | React to setting changes |
+| `EXTENSION_SETTINGS_LOADED` | Extension settings loaded | — | Initialize extension state |
+| `EXTENSIONS_FIRST_LOAD` | Extensions loaded for the first time | — | One-time setup |
+| `CHATCOMPLETION_SOURCE_CHANGED` | Chat completion API source changed | `(source)` | Adapt to different APIs |
+| `CHATCOMPLETION_MODEL_CHANGED` | Model selection changed | `(model)` | Model-specific behavior |
+| `MAIN_API_CHANGED` | Main API backend changed | `(api)` | API-specific adaptations |
+| `ONLINE_STATUS_CHANGED` | API connection status changed | `(status)` | Show/hide connection-dependent UI |
+| `CONNECTION_PROFILE_LOADED` | Connection profile loaded | `(profileData)` | Profile-specific setup |
+| `PRESET_CHANGED` | Any preset is changed | `(presetName)` | React to preset switches |
+
+#### World Info Events
+
+| Event | Fires When | Params | Typical Use |
+|-------|-----------|--------|-------------|
+| `WORLDINFO_UPDATED` | World Info entries are changed | `(worldInfoData)` | React to lore changes |
+| `WORLDINFO_SETTINGS_UPDATED` | World Info settings changed | — | React to WI config changes |
+| `WORLDINFO_ENTRIES_LOADED` | World Info entries finish loading | — | Post-load processing |
+| `WORLDINFO_SCAN_DONE` | WI keyword scanning completes | `(scanResult)` mutable | Modify activation results |
+| `WORLD_INFO_ACTIVATED` | WI entries activated during prompt building | `(activatedEntries)` | Track which lore is active |
+
+#### Prompt Pipeline Events
+
+| Event | Fires When | Params | Typical Use |
+|-------|-----------|--------|-------------|
+| `CHAT_COMPLETION_SETTINGS_READY` | Chat completion settings loaded | — | Modify completion config |
+| `CHAT_COMPLETION_PROMPT_READY` | Prompt array assembled, ready to send | `(promptData)` mutable | Modify final prompt array |
+| `TEXT_COMPLETION_SETTINGS_READY` | Text completion settings loaded | — | Modify text completion config |
+
+#### Tool Call Events
+
+| Event | Fires When | Params | Typical Use |
+|-------|-----------|--------|-------------|
+| `TOOL_CALLS_PERFORMED` | Tool/function calls have been executed | `(toolCallResults)` | Process tool results |
+| `TOOL_CALLS_RENDERED` | Tool call results rendered in UI | `(toolCallResults)` | Post-render tool UI updates |
+
+#### App Lifecycle Events
+
+| Event | Fires When | Params | Typical Use |
+|-------|-----------|--------|-------------|
+| `APP_INITIALIZED` | Core systems loaded (sticky) | — | Safe to query app state |
+| `APP_READY` | UI fully interactive (sticky) | — | Safe to interact with all systems |
+
+> **Sticky events**: `APP_INITIALIZED` and `APP_READY` are "sticky" — if you subscribe after they've fired, your callback runs immediately. All other events are fire-and-forget.
+
+> **Important**: Always check that an event type exists before subscribing: `if (eventTypes.GENERATION_STARTED) { eventSource.on(...) }`. This guards against ST version differences where events may not be defined.
+
+> **String value inconsistencies**: Most event string values use `snake_case`, but a few use `camelCase` (e.g., `CHAT_LOADED` → `'chatLoaded'`, `CHARACTER_DELETED` → `'characterDeleted'`). Always use the constant name, never the raw string.
 
 ### Distinguishing New Messages vs. Continues
 
@@ -200,6 +309,30 @@ eventSource.on(eventTypes.MESSAGE_RECEIVED, () => {
 ```
 
 The 1000ms delay is important — ST fires `MESSAGE_EDITED` slightly after generation completes.
+
+### One-Time Event Listeners
+
+For events you only need to catch once (e.g., waiting for a specific user message), manually remove the listener:
+
+```javascript
+const onUserMessage = () => {
+    eventSource.removeListener(eventTypes.USER_MESSAGE_RENDERED, onUserMessage);
+    // Handle the event...
+};
+eventSource.on(eventTypes.USER_MESSAGE_RENDERED, onUserMessage);
+```
+
+### `MESSAGE_EDITED` Parameter Caveat
+
+The `messageId` passed to `MESSAGE_EDITED` handlers is a **string**, not a number. Always use `parseInt()` when comparing:
+
+```javascript
+eventSource.on(eventTypes.MESSAGE_EDITED, (messageId) => {
+    if (parseInt(messageId) === myStoredIndex) {
+        // This is the message we're tracking
+    }
+});
+```
 
 ---
 
@@ -329,7 +462,27 @@ Prefix IDs and classes to avoid collisions:
 }
 .my-button:hover { opacity: 1; }
 .my-button.active { opacity: 1; color: var(--SmartThemeQuoteColor, #e8a23a); }
+
+/* Pseudo-element status indicators (e.g., active dot under a button) */
+.my-button.active::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--SmartThemeQuoteColor, #e8a23a);
+}
+
+/* Message border indicators (use !important to override ST's base styles) */
+.mes.my-highlighted-message {
+    border-left: 3px solid var(--SmartThemeQuoteColor, #e8a23a) !important;
+}
 ```
+
+> **Note on `!important`**: Sometimes necessary when overriding ST's base message styles (e.g., borders). Use sparingly and only on elements where ST's own styles would win otherwise.
 
 ---
 
@@ -405,6 +558,100 @@ const btn = document.getElementById('option_continue');
 if (btn) btn.click();
 ```
 
+### Important: `#mes_continue` vs `#option_continue`
+
+SillyTavern has **two** Continue buttons with different behaviors:
+
+| Button | Location | Behavior |
+|--------|----------|----------|
+| `#option_continue` | Hamburger menu (`send_form`) | Continues the last message |
+| `#mes_continue` | Quick-action bar (`rightSendForm`) | If text is in `#send_textarea`, posts it as a user message AND continues. Otherwise, same as `#option_continue` |
+
+The `/continue` slash command behaves like `#option_continue` — it does **not** post typed text. If you need to handle typed input + continue, use `#mes_continue.click()` instead.
+
+---
+
+## Detecting User Input Text
+
+Check `#send_textarea` before performing actions — the user may have typed text:
+
+```javascript
+const textarea = document.getElementById('send_textarea');
+const inputText = textarea?.value?.trim();
+
+if (inputText) {
+    // User has typed something — handle it
+} else {
+    // No input — proceed with default behavior
+}
+```
+
+---
+
+## Auto-Confirming Active Edits
+
+If a user is editing a message (the edit textarea is visible), you may need to confirm the edit before proceeding with your action:
+
+```javascript
+function confirmActiveMessageEdit() {
+    const visibleEditButtons = document.querySelector(
+        '#chat .mes .mes_edit_buttons[style*="display: inline-flex"]'
+    );
+    if (visibleEditButtons) {
+        const editDoneBtn = visibleEditButtons.querySelector('.mes_edit_done');
+        if (editDoneBtn) {
+            editDoneBtn.click();
+            return true;  // An edit was confirmed
+        }
+    }
+    return false;
+}
+```
+
+**Important**: ST updates `chat[N].mes` synchronously on edit confirm, but the `MESSAGE_EDITED` event fires asynchronously. If you need the updated text immediately after confirming, read it from `context.chat[N].mes` directly — don't wait for the event.
+
+---
+
+## Hooking Existing ST Buttons
+
+To react when the user clicks ST's native buttons (e.g., Continue), add click listeners:
+
+```javascript
+function hookExistingButtons() {
+    const continueButton = document.getElementById('option_continue');
+    if (continueButton) {
+        continueButton.addEventListener('click', () => myHandler());
+    }
+
+    const quickContinueBtn = document.getElementById('mes_continue');
+    if (quickContinueBtn) {
+        quickContinueBtn.addEventListener('click', () => myHandler());
+    }
+}
+```
+
+This is useful for "auto-set on Continue" type features where your extension reacts to ST's built-in actions.
+
+---
+
+## Debug Logging Pattern
+
+Add a conditional debug logger controlled by a user setting:
+
+```javascript
+const defaultSettings = {
+    debugMode: false,
+    // ...other settings
+};
+
+function debug(...args) {
+    if (!extensionSettings.debugMode) return;
+    console.log('MY-EXTENSION:', ...args);
+}
+```
+
+Use liberally throughout your code — it's free when disabled and invaluable when enabled. Log state transitions, event handlers, and guard flag changes.
+
 ---
 
 ## Best Practices Summary
@@ -418,8 +665,16 @@ if (btn) btn.click();
 7. **Use event-driven architecture** — subscribe to ST events, don't poll
 8. **Provide graceful fallbacks** — check if APIs exist before calling them
 9. **Scope your CSS** — prefix all IDs/classes to avoid conflicts
-10. **Keep it lean** — a single `index.js` and `style.css` is often sufficient. No build tools needed.
+10. **Keep it lean** — a single `index.js` and `style.css` is often sufficient. No build tools needed
 11. **No external dependencies** — SillyTavern extensions run in the browser; prefer vanilla JS + jQuery (already available)
+12. **Check eventType existence** — guard with `if (eventTypes.EVENT_NAME)` before subscribing, since event types may differ across ST versions
+13. **`MESSAGE_EDITED` messageId is a string** — always `parseInt()` when comparing to numeric indices
+14. **Auto-confirm active edits** — if your action modifies message state, confirm any in-progress edits first to avoid data loss
+15. **Check `#send_textarea` for typed input** — the user may have text queued; handle it or warn before overwriting
+16. **Use the 1000ms unlock delay** — after `MESSAGE_RECEIVED`, delay unlocking guard flags to catch post-generation `MESSAGE_EDITED` events
+17. **Add debug logging** — a conditional `debug()` function controlled by a setting costs nothing when off and saves hours of troubleshooting
+18. **Multiple button placements** — add buttons to both the hamburger menu (`send_form`) and quick-action bar (`rightSendForm`) for discoverability
+19. **Hide/show buttons during generation** — toggle `display` on quick-action buttons via `GENERATION_STARTED`/`GENERATION_ENDED` to prevent double-triggers
 
 ---
 
