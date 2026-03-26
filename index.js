@@ -322,24 +322,24 @@ async function reRenderMessage(messageIndex) {
 }
 
 async function triggerContinue() {
-    const context = SillyTavern.getContext();
-
-    // Approach 1: Slash command system (most stable)
-    if (context.executeSlashCommandsWithOptions) {
-        debug('triggerContinue: using slash command /continue');
-        await context.executeSlashCommandsWithOptions('/continue');
+    // Prefer clicking #mes_continue — the /continue slash command can
+    // cause double generation in group chats.
+    const mesContinueBtn = document.getElementById('mes_continue');
+    if (mesContinueBtn) {
+        debug('triggerContinue: clicking #mes_continue');
+        mesContinueBtn.click();
         return;
     }
 
-    // Approach 2: Click the Continue button
-    const continueButton = document.getElementById('option_continue');
-    if (continueButton) {
-        debug('triggerContinue: falling back to button click');
-        continueButton.click();
+    // Fallback: hamburger menu Continue button
+    const optionContinueBtn = document.getElementById('option_continue');
+    if (optionContinueBtn) {
+        debug('triggerContinue: clicking #option_continue');
+        optionContinueBtn.click();
         return;
     }
 
-    debug('triggerContinue: no continue method available');
+    debug('triggerContinue: no continue button available');
     toast('Could not trigger Continue. Is the Continue button enabled?', 'error');
 }
 
