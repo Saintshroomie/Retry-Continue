@@ -86,10 +86,30 @@ function toast(message, type = 'info') {
     }
 }
 
+// ─── Auto-Confirm Edit ──────────────────────────────────────────────
+
+/**
+ * If any message is currently being edited (has a visible edit textarea),
+ * confirm the edit so the message exits editing state before we proceed.
+ */
+function confirmActiveMessageEdit() {
+    const editDoneBtn = document.querySelector('#chat .mes .mes_edit_done:not([style*="display: none"])');
+    if (editDoneBtn) {
+        debug('confirmActiveMessageEdit: found active edit, clicking confirm');
+        editDoneBtn.click();
+        return true;
+    }
+    return false;
+}
+
 // ─── Core Retry Logic ────────────────────────────────────────────────
 
 async function doRetry() {
     debug('doRetry: invoked');
+
+    // Auto-confirm any in-progress message edit
+    confirmActiveMessageEdit();
+
     const context = SillyTavern.getContext();
     const chat = context.chat;
 
