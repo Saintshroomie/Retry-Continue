@@ -189,6 +189,9 @@ async function doRetry() {
  * Handles the case where the user has text in the input area when pressing
  * retry-continue. The typed text becomes the checkpoint, gets posted as a
  * user message, and then a continue runs to generate the rest.
+ *
+ * Flow: click Send → wait for user message to render → stop AI generation
+ * that was triggered by the send → continue the user message.
  */
 async function handleTypedMessageRetry(inputText) {
     const context = SillyTavern.getContext();
@@ -204,25 +207,112 @@ async function handleTypedMessageRetry(inputText) {
     retryState.active = true;
     retryState.snapshotText = inputText;
     retryState.retryCount = 1;
-    retryState.messageId = null; // will be set by event handler
+    retryState.messageId = null;
 
-    // Listen for the user message to capture its index
-    const onUserMessage = () => {
-        eventSource.removeListener(eventTypes.USER_MESSAGE_RENDERED, onUserMessage);
-        const ctx = SillyTavern.getContext();
-        retryState.messageId = ctx.chat.length - 1;
-        debug('handleTypedMessageRetry: USER_MESSAGE_RENDERED — messageId set to', retryState.messageId);
-        saveRetryState();
-        updateButtonVisuals();
-        updateMessageIndicator();
-    };
-    eventSource.on(eventTypes.USER_MESSAGE_RENDERED, onUserMessage);
+    // Promise that resolves when the user message appears in chat
+    const messageRendered = new Promise((resolve) => {
+        const handler = () => {
+            eventSource.removeListener(eventTypes.USER_MESSAGE_RENDERED, handler);
+            resolve();
+        };
+        eventSource.on(eventTypes.USER_MESSAGE_RENDERED, handler);
+    });
 
-    // Trigger ST's native /continue, which posts the typed message
-    // and then continues generating from it
+    // Click Send to post the user message through ST's normal pipeline.
+    // The textarea already contains the typed text.
+    const sendButton = document.getElementById('send_but');
+    if (!sendButton) {
+        debug('handleTypedMessageRetry: send button not found, aborting');
+        toast('Could not find send button.', 'error');
+        snapshotLocked = false;
+        resetRetryState();
+        return;
+    }
+    debug('handleTypedMessageRetry: clicking send button');
+    sendButton.click();
+
+    // Wait for the user message to appear in chat
+    await messageRendered;
+
+    // Capture the message index now that it's in the chat
+    const freshCtx = SillyTavern.getContext();
+    retryState.messageId = freshCtx.chat.length - 1;
+    debug('handleTypedMessageRetry: user message rendered, messageId =', retryState.messageId);
+    saveRetryState();
+    updateButtonVisuals();
+    updateMessageIndicator();
+
+    // Sending a user message triggers AI generation — we need to stop it
+    // because we want to /continue the user message instead.
+    await stopGenerationIfActive();
+
+    // Now continue the user message
     toast('Message checkpoint set — continuing...');
-    debug('handleTypedMessageRetry: triggering /continue (will post message + continue)');
+    debug('handleTypedMessageRetry: triggering continue on user message');
     await triggerContinue();
+}
+
+/**
+ * Stops any active AI generation and waits for it to settle.
+ */
+async function stopGenerationIfActive() {
+    const context = SillyTavern.getContext();
+    const { eventSource, eventTypes } = context;
+
+    if (!context.isGenerating) {
+        debug('stopGenerationIfActive: no generation in progress');
+        return;
+    }
+
+    debug('stopGenerationIfActive: stopping generation');
+
+    // Wait for generation to end after we click stop
+    const genStopped = new Promise((resolve) => {
+        let resolved = false;
+        const done = () => {
+            if (resolved) return;
+            resolved = true;
+            resolve();
+        };
+
+        if (eventTypes.GENERATION_ENDED) {
+            const handler = () => {
+                eventSource.removeListener(eventTypes.GENERATION_ENDED, handler);
+                done();
+            };
+            eventSource.on(eventTypes.GENERATION_ENDED, handler);
+        }
+        // Safety timeout in case the event never fires
+        setTimeout(done, 5000);
+    });
+
+    // Click the stop button
+    const stopButton = document.getElementById('mes_stop');
+    if (stopButton) {
+        stopButton.click();
+    }
+
+    await genStopped;
+    debug('stopGenerationIfActive: generation stopped');
+
+    // Brief pause to let ST settle after stopping
+    await new Promise((r) => setTimeout(r, 500));
+
+    // If an AI message was partially created during the brief generation,
+    // remove it so the user message is the last message for /continue
+    const postStopCtx = SillyTavern.getContext();
+    const lastIdx = postStopCtx.chat.length - 1;
+    if (lastIdx > retryState.messageId) {
+        const lastMsg = postStopCtx.chat[lastIdx];
+        if (lastMsg && !lastMsg.is_user) {
+            debug('stopGenerationIfActive: removing partial AI message at index', lastIdx);
+            postStopCtx.chat.splice(lastIdx, 1);
+            await postStopCtx.saveChat();
+            // Remove the message element from the DOM
+            const msgEl = document.querySelector(`#chat .mes[mesid="${lastIdx}"]`);
+            if (msgEl) msgEl.remove();
+        }
+    }
 }
 
 // ─── Swipe Creation & Continue ───────────────────────────────────────
