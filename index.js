@@ -578,7 +578,7 @@ function saveExtensionSettings() {
     const context = SillyTavern.getContext();
     if (!context.extensionSettings) return;
     context.extensionSettings.retryContinue = { ...extensionSettings };
-    context.saveSettings();
+    context.saveSettingsDebounced();
 }
 
 // ─── Slash Commands ──────────────────────────────────────────────────
