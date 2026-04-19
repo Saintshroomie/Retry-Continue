@@ -61,8 +61,14 @@
 
 /* Settings panel spacing */
 #retry_continue_settings .inline-drawer-content label {
-    display: block;
     margin: 6px 0;
+}
+
+/* Keep checkbox + label text on the same line */
+#retry_continue_settings .inline-drawer-content label.checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
 }
 
 #retry_continue_settings .inline-drawer-content select {
