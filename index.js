@@ -20,6 +20,7 @@ let snapshotLocked = false;
 
 // Extension settings with defaults
 const defaultSettings = {
+    autoContinue: true,
     autoSetOnContinue: false,
     showToasts: true,
     indicatorStyle: 'border', // 'border' | 'icon' | 'none'
@@ -287,11 +288,16 @@ async function createSnapshotSwipeAndContinue(lastMsg, lastMsgIndex) {
     // Update message indicator
     updateMessageIndicator();
 
-    // Trigger Continue to generate from the snapshot
-    toast('Retrying from checkpoint...');
-    snapshotLocked = true;
-    debug('createSnapshotSwipeAndContinue: snapshotLocked = true, triggering continue');
-    await triggerContinue();
+    // Trigger Continue to generate from the snapshot (if Auto-Continue enabled)
+    if (extensionSettings.autoContinue) {
+        toast('Retrying from checkpoint...');
+        snapshotLocked = true;
+        debug('createSnapshotSwipeAndContinue: snapshotLocked = true, triggering continue');
+        await triggerContinue();
+    } else {
+        debug('createSnapshotSwipeAndContinue: autoContinue disabled, skipping continue');
+        toast('New swipe created from checkpoint.');
+    }
 }
 
 async function reRenderMessage(messageIndex) {
@@ -486,6 +492,10 @@ function addSettingsPanel() {
             </div>
             <div class="inline-drawer-content">
                 <label class="checkbox_label">
+                    <input id="retry_autocontinue" type="checkbox" />
+                    <span>Auto-Continue (generate after creating retry swipe)</span>
+                </label>
+                <label class="checkbox_label">
                     <input id="retry_auto_continue" type="checkbox" />
                     <span>Auto-set checkpoint on Continue</span>
                 </label>
@@ -515,10 +525,19 @@ function addSettingsPanel() {
     settingsContainer.insertAdjacentHTML('beforeend', html);
 
     // Bind controls
+    const autoContinueCheck = document.getElementById('retry_autocontinue');
     const autoCheck = document.getElementById('retry_auto_continue');
     const toastCheck = document.getElementById('retry_show_toasts');
     const styleSelect = document.getElementById('retry_indicator_style');
     const clearBtn = document.getElementById('retry_clear_checkpoint');
+
+    if (autoContinueCheck) {
+        autoContinueCheck.checked = extensionSettings.autoContinue;
+        autoContinueCheck.addEventListener('change', () => {
+            extensionSettings.autoContinue = autoContinueCheck.checked;
+            saveExtensionSettings();
+        });
+    }
 
     if (autoCheck) {
         autoCheck.checked = extensionSettings.autoSetOnContinue;
